@@ -1,0 +1,9 @@
+
+from: C:/Users/Michael/Documents/shooting-coach/datasets # dataset root dir
+train: train/images # training images
+val: valid/images # validation images
+
+names:
+  0: basketball
+  1: rim
+  2: idk man tf
