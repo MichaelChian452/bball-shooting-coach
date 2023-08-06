@@ -1,0 +1,10 @@
+
+path: '/content/gdrive/My Drive/cv/datasets' # dataset root dir
+train: train/images  # train images
+val: valid/images  # val images
+
+# Classes
+names:
+  0: basketball
+  1: rim
+  2: idk
