@@ -1,6 +1,7 @@
 import os
 from ultralytics import YOLO
 import cv2
+import time
 
 # -- Constants --
 
@@ -53,21 +54,21 @@ model_path = os.path.join('.', 'best.pt')
 
 # -- Testing on image --
 
-model = YOLO(model_path)
-results = model(frame)[0]
-threshold = 0.5
+# model = YOLO(model_path)
+# results = model(frame)[0]
+# threshold = 0.5
 
-for result in results.boxes.data.tolist():
-    x1, y1, x2, y2, score, class_id = result
+# for result in results.boxes.data.tolist():
+#     x1, y1, x2, y2, score, class_id = result
 
-    if score > threshold:
-        cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 4)
-        cv2.putText(frame, results.names[int(class_id)].upper(), (int(x1), int(y1 - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 0), 3, cv2.LINE_AA)
+#     if score > threshold:
+#         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 4)
+#         cv2.putText(frame, results.names[int(class_id)].upper(), (int(x1), int(y1 - 10)),
+#                     cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 0), 3, cv2.LINE_AA)
 
-cv2.imshow('cat', frame)
-cv2.imwrite('result.jpg', frame)
-cv2.waitKey(0)
+# cv2.imshow('cat', frame)
+# cv2.imwrite('result.jpg', frame)
+# cv2.waitKey(0)
 
 # -- Testing on video --
 
@@ -101,3 +102,42 @@ cv2.waitKey(0)
 # cap.release()
 # out.release()
 # cv2.destroyAllWindows()
+
+# -- Testing on webcam --
+
+model = YOLO('best.pt')
+
+# Open the webcam
+cap = cv2.VideoCapture(0)
+
+prev_frame_time = 0
+
+new_frame_time = 0
+
+while cap.isOpened():
+    # Read frame from video
+    success, frame = cap.read()
+
+    if success:
+        # Run YOLOv8 pose estimation on frame
+        results = model(frame, save=True)
+
+        # Get annotated frame
+        annotated_frame = results[0].plot()
+
+        new_frame_time = time.time()
+        fps = 1/(new_frame_time - prev_frame_time)
+        prev_frame_time = new_frame_time
+        fps = int(fps)
+        fps = str(fps)
+        cv2.putText(annotated_frame, fps, (7, 70), cv2.FONT_HERSHEY_COMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+        cv2.imshow('yolov8 estimate', annotated_frame)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+    else:
+        break
+
+# Release the webcam and destroy the windows
+cap.release()
+cv2.destroyAllWindows()
