@@ -34,16 +34,21 @@ class ShootingCoach:
         self.dom_ankle_pos = None
         self.avg_dom_hand_pos = None # average position of wrist, index, pinky, and thumb
 
+        self.release_time = 0
+        self.shot_start_time = 0
         self.prev_ball_pos = []
         self.ball_pos = []
 
         self.ball_positions = []
+        self.release_angle = 0
         self.elbow = []
         self.shoulder = []
         self.knee = []
 
     # In order for the person to be shooting, the ball should be going upwards (-y direction)
     def is_ball_going_up(self, prev_ball_center_pos, ball_center_pos):
+        if len(ball_center_pos) < 2 or len(prev_ball_center_pos) < 2:
+            return False
         return True if prev_ball_center_pos[1] > ball_center_pos[1] else False
 
     # Return true if person is holding basketball (not simply if their hand is touching but if they aren't in the process of dribbling)
@@ -68,6 +73,11 @@ class ShootingCoach:
         if angle > 180.0:
             angle = 360 - angle
         return angle
+
+    def determine_shot_form(self):
+        self.release_time = time.time() - self.shot_start_time
+        self.release_angle = self.shoulder[-1]
+
 
     def calculate_shooting_form(self, bball_results, landmarks):
         # find position of ball and convert to relative coords
@@ -109,19 +119,33 @@ class ShootingCoach:
 
         self.prev_in_shooting_form = self.in_shooting_form
 
-        # if you are holding ball but the ball isnt giong up, it isnt a shot, so reset variables
         if self.holding_ball and not self.is_ball_going_up(self.prev_ball_pos, self.ball_pos):
+            # if you are holding ball but the ball isnt giong up, it isnt a shot, so reset variables
             self.in_shooting_form = False
+            self.ball_in_air = False
             self.shoulder = []
             self.elbow = []
             self.knee = []
-        elif self.holding_ball: # but if the ball is going up, then it might be a shot, so keep track of variables
+            self.ball_positions = []
+            self.release_time = -1
+
+        elif self.holding_ball:
+            # but if the ball is going up, then it might be a shot, so keep track of variables
             self.in_shooting_form = True
+            self.ball_in_air = False
             self.elbow.append(elbow_angle)
             self.shoulder.append(shoulder_angle)
             self.knee.append(knee_angle)
-        elif self.prev_in_shooting_form and self.is_ball_going_up(self.prev_ball_pos, self.ball_pos): # if used to be shooting and ball is going up, then the shot is in the air
+            self.shot_start_time = time.time()
+
+        elif self.prev_in_shooting_form and self.is_ball_going_up(self.prev_ball_pos, self.ball_pos):
+            # if used to be shooting and ball is going up, then the shot is in the air
             self.ball_in_air = True
+            self.ball_positions.append(self.ball_pos)
+            self.determine_shot_form()
+
+        elif self.ball_in_air:
+            self.ball_positions.append(self.ball_pos)
             
 
         return elbow_angle, shoulder_angle, knee_angle
@@ -179,6 +203,9 @@ class ShootingCoach:
                     cv2.putText(image, 'holding: ' + str(self.holding_ball), (7, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
                     cv2.putText(image, 'in shoot: ' + str(self.in_shooting_form), (7, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
                     cv2.putText(image, 'prev in shoot: ' + str(self.prev_in_shooting_form), (7, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                    cv2.putText(image, 'in air: ' + str(self.ball_in_air), (7, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                    cv2.putText(image, 'release time: ' + str(self.release_time), (7, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                    cv2.putText(image, 'release angle: ' + str(self.release_angle), (7, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
                 
                     # Add elbow angle text and fps
                     new_frame_time = time.time()
@@ -186,7 +213,7 @@ class ShootingCoach:
                     prev_frame_time = new_frame_time
                     fps = int(fps)
                     fps = str(fps)
-                    cv2.putText(image, fps, (7, 70), cv2.FONT_HERSHEY_COMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                    cv2.putText(image, fps, (600, 70), cv2.FONT_HERSHEY_COMPLEX, 1, (100, 255, 0), 1, cv2.LINE_AA)
                     
                     # Show image
                     cv2.imshow('mediapipe', image)
