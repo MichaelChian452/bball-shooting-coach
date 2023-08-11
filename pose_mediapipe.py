@@ -3,6 +3,8 @@ import mediapipe as mp
 from ultralytics import YOLO
 import numpy as np
 import time
+import json
+import sqlite3
 
 class ShootingCoach:
     def __init__(self):
@@ -41,9 +43,39 @@ class ShootingCoach:
 
         self.ball_positions = []
         self.release_angle = 0
+        self.shooting_elbow_angle = 0
+        self.shooting_knee_angle = 0
         self.elbow = []
         self.shoulder = []
         self.knee = []
+
+    # Create table and save into sqlite db
+    def save_shot_data_to_db(self):
+
+        # Connect to database
+        conn = sqlite3.connect("shots.db")
+
+        # Create a cursor
+        c = conn.cursor()
+
+        # Create a Table
+        c.execute("""CREATE TABLE IF NOT EXISTS shots (
+                release_time real, 
+                release_angle real,
+                elbow_angle real, 
+                knee_angle real, 
+                ball_position text
+        )""")
+        conn.commit()
+
+        c.execute("INSERT INTO shots VALUES (?, ?, ?, ?, ?)", (self.release_time, self.release_angle, self.shooting_elbow_angle, self.shooting_knee_angle, json.dumps(self.ball_pos)))
+
+        # Each row is a tuple
+        for row in c.execute("SELECT rowid, * FROM shots"):
+            print(row)
+        conn.commit() 
+
+        conn.close()
 
     # In order for the person to be shooting, the ball should be going upwards (-y direction)
     def is_ball_going_up(self, prev_ball_center_pos, ball_center_pos):
@@ -77,6 +109,8 @@ class ShootingCoach:
     def determine_shot_form(self):
         self.release_time = time.time() - self.shot_start_time
         self.release_angle = self.shoulder[-1]
+        self.shooting_elbow_angle = min(self.elbow)
+        self.shooting_knee_angle = max(self.knee)
 
 
     def calculate_shooting_form(self, bball_results, landmarks):
@@ -87,11 +121,10 @@ class ShootingCoach:
         for ball in bball_results:
             for box in ball.boxes.xyxy:
                 x1, y1, x2, y2 = box[:4]
-                ball_x_center = (x1 + x2) / 2 / self.width
-                ball_y_center = (y1 + y2) / 2 / self.height
-                self.ball_pos = [ball_x_center, ball_y_center]
+                ball_x_center = ((x1 + x2) / 2 / self.width).detach().numpy()
+                ball_y_center = ((y1 + y2) / 2 / self.height).detach().numpy()
+                self.ball_pos = [ball_x_center[()].item(), ball_y_center[()].item()]
                 ball_width = np.abs((x2 - x1) / self.width)
-
         # find pose landmarks
         if self.right_handed:
             self.dom_shoulder_pos = [landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value].x, landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value].y]
@@ -121,13 +154,15 @@ class ShootingCoach:
 
         if self.holding_ball and not self.is_ball_going_up(self.prev_ball_pos, self.ball_pos):
             # if you are holding ball but the ball isnt giong up, it isnt a shot, so reset variables
+            # if the ball was previously in air, then a shot ws just completed, so write to database
+            if self.ball_in_air:
+                self.save_shot_data_to_db()
             self.in_shooting_form = False
             self.ball_in_air = False
             self.shoulder = []
             self.elbow = []
             self.knee = []
             self.ball_positions = []
-            self.release_time = -1
 
         elif self.holding_ball:
             # but if the ball is going up, then it might be a shot, so keep track of variables
@@ -136,19 +171,20 @@ class ShootingCoach:
             self.elbow.append(elbow_angle)
             self.shoulder.append(shoulder_angle)
             self.knee.append(knee_angle)
+            self.ball_positions.append(self.ball_pos)
             self.shot_start_time = time.time()
 
+        elif self.ball_in_air:
+            # If the ball is in the air, track the position
+            self.ball_positions.append(self.ball_pos)
+
         elif self.prev_in_shooting_form and self.is_ball_going_up(self.prev_ball_pos, self.ball_pos):
-            # if used to be shooting and ball is going up, then the shot is in the air
+            # if used to be shooting and ball is going up, then the shot is in the air, only going to hit first frame after shot in air
             self.ball_in_air = True
             self.ball_positions.append(self.ball_pos)
             self.determine_shot_form()
 
-        elif self.ball_in_air:
-            self.ball_positions.append(self.ball_pos)
-            
-
-        return elbow_angle, shoulder_angle, knee_angle
+        return elbow_angle
 
     def shot_detection(self):
         # Open the webcam
@@ -189,16 +225,12 @@ class ShootingCoach:
                     # Get annotated frame with pose
                     self.mp_drawing.draw_landmarks(image, pose_results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
 
-
                     # Extract Landmarks
                     try:
                         self.landmarks = pose_results.pose_landmarks.landmark
                     except:
                         pass
-                    self.angles = self.calculate_shooting_form(bball_results, self.landmarks)
-                    elbow_angle = self.angles[0]
-                    shoulder_angle = self.angles[1]
-                    knee_angle = self.angles[2]
+                    elbow_angle = self.calculate_shooting_form(bball_results, self.landmarks)
                     cv2.putText(image, 'elbow: ' + str(elbow_angle), (7, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
                     cv2.putText(image, 'holding: ' + str(self.holding_ball), (7, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
                     cv2.putText(image, 'in shoot: ' + str(self.in_shooting_form), (7, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
@@ -206,6 +238,8 @@ class ShootingCoach:
                     cv2.putText(image, 'in air: ' + str(self.ball_in_air), (7, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
                     cv2.putText(image, 'release time: ' + str(self.release_time), (7, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
                     cv2.putText(image, 'release angle: ' + str(self.release_angle), (7, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                    cv2.putText(image, 'sea: ' + str(self.shooting_elbow_angle), (7, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                    cv2.putText(image, 'ska: ' + str(self.shooting_knee_angle), (7, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
                 
                     # Add elbow angle text and fps
                     new_frame_time = time.time()
