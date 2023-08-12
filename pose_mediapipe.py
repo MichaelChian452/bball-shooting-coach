@@ -68,12 +68,33 @@ class ShootingCoach:
         )""")
         conn.commit()
 
-        c.execute("INSERT INTO shots VALUES (?, ?, ?, ?, ?)", (self.release_time, self.release_angle, self.shooting_elbow_angle, self.shooting_knee_angle, json.dumps(self.ball_pos)))
+        c.execute("INSERT INTO shots VALUES (?, ?, ?, ?, ?)", (self.release_time, self.release_angle, self.shooting_elbow_angle, self.shooting_knee_angle, json.dumps(self.ball_positions)))
 
         # Each row is a tuple
         for row in c.execute("SELECT rowid, * FROM shots"):
             print(row)
         conn.commit() 
+
+        conn.close()
+
+    def get_last_shot_from_db(self):
+        
+        # Connect to database
+        conn = sqlite3.connect("shots.db")
+
+        # Create a cursor
+        c = conn.cursor()
+
+        c.execute("SELECT ball_position FROM table ORDER BY id DESC LIMIT 1")
+        result = c.fetchone()
+        
+        POSITION_OF_BALLPOSITIONS_IN_DB = 6
+
+        print(result[POSITION_OF_BALLPOSITIONS_IN_DB])
+        result_list = result[1:-1].split(' ')
+        to_return = []
+        for position in result_list:
+            ball_position = position[1:-1]
 
         conn.close()
 
@@ -88,7 +109,7 @@ class ShootingCoach:
         if len(ball_center_pos) == 0:
             return False
         dist = np.hypot(ball_center_pos[0] - avg_hand_pos[0], ball_center_pos[1] - avg_hand_pos[1])
-        holding_ball = dist < 4 * ball_width / 5 # should be half ball width technically but giving some leeway
+        holding_ball = dist < ball_width # should be half ball width technically but giving some leeway
         return holding_ball
 
     # Calculate angle between three points in the order a -- b -- c, for example, a = shoulder, b = elbow, c = wrist
@@ -186,6 +207,24 @@ class ShootingCoach:
 
         return elbow_angle
 
+    def draw_prev_shot(self, image):
+        image = self.draw_arc(image, None)
+
+    def draw_arc(self, image, shot_ball_positions):
+        if shot_ball_positions is None:
+            return image
+        prev_pos = None
+        for pos in shot_ball_positions:
+            if len(pos) < 2:
+                continue
+            px_pos = (int(pos[0] * self.width), int(pos[1] * self.height))
+            print(px_pos)
+            image = cv2.circle(image, px_pos, radius=0, color=(0, 0, 255), thickness=-1)
+            if prev_pos is not None:
+                image = cv2.line(image, prev_pos, px_pos, (0, 0, 255), thickness=1)
+            prev_pos = px_pos
+        return image
+
     def shot_detection(self):
         # Open the webcam
         cap = cv2.VideoCapture(0)
@@ -228,19 +267,19 @@ class ShootingCoach:
                     # Extract Landmarks
                     try:
                         self.landmarks = pose_results.pose_landmarks.landmark
+                        elbow_angle = self.calculate_shooting_form(bball_results, self.landmarks)
+                        cv2.putText(image, 'elbow: ' + str(elbow_angle), (7, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, 'holding: ' + str(self.holding_ball), (7, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, 'in shoot: ' + str(self.in_shooting_form), (7, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, 'prev in shoot: ' + str(self.prev_in_shooting_form), (7, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, 'in air: ' + str(self.ball_in_air), (7, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, 'release time: ' + str(self.release_time), (7, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, 'release angle: ' + str(self.release_angle), (7, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, 'sea: ' + str(self.shooting_elbow_angle), (7, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, 'ska: ' + str(self.shooting_knee_angle), (7, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
                     except:
                         pass
-                    elbow_angle = self.calculate_shooting_form(bball_results, self.landmarks)
-                    cv2.putText(image, 'elbow: ' + str(elbow_angle), (7, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, 'holding: ' + str(self.holding_ball), (7, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, 'in shoot: ' + str(self.in_shooting_form), (7, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, 'prev in shoot: ' + str(self.prev_in_shooting_form), (7, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, 'in air: ' + str(self.ball_in_air), (7, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, 'release time: ' + str(self.release_time), (7, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, 'release angle: ' + str(self.release_angle), (7, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, 'sea: ' + str(self.shooting_elbow_angle), (7, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, 'ska: ' + str(self.shooting_knee_angle), (7, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0), 1, cv2.LINE_AA)
-                
+
                     # Add elbow angle text and fps
                     new_frame_time = time.time()
                     fps = 1/(new_frame_time - prev_frame_time)
@@ -249,6 +288,9 @@ class ShootingCoach:
                     fps = str(fps)
                     cv2.putText(image, fps, (600, 70), cv2.FONT_HERSHEY_COMPLEX, 1, (100, 255, 0), 1, cv2.LINE_AA)
                     
+                    # if the ball is in air, draw arc
+                    self.draw_prev_shot(image)
+
                     # Show image
                     cv2.imshow('mediapipe', image)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -259,6 +301,7 @@ class ShootingCoach:
         # Release the webcam and destroy the windows
         cap.release()
         cv2.destroyAllWindows()
+
 
 if __name__ == '__main__':
     detector = ShootingCoach()
