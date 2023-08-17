@@ -7,6 +7,25 @@ import json
 import sqlite3
 
 class ShootingCoach:
+    def create_table(self):
+        
+        # Connect to database
+        conn = sqlite3.connect("shots.db")
+
+        # Create a cursor
+        c = conn.cursor()
+
+        # Create a Table
+        c.execute("""CREATE TABLE IF NOT EXISTS shots (
+                release_time real, 
+                release_angle real,
+                elbow_angle real, 
+                knee_angle real, 
+                ball_position text
+        )""")
+        conn.commit()
+        conn.close()
+
     def __init__(self):
         self.mp_drawing = mp.solutions.drawing_utils
         self.mp_pose = mp.solutions.pose
@@ -48,6 +67,7 @@ class ShootingCoach:
         self.elbow = []
         self.shoulder = []
         self.knee = []
+        self.create_table()
 
     # Create table and save into sqlite db
     def save_shot_data_to_db(self):
@@ -85,18 +105,23 @@ class ShootingCoach:
         # Create a cursor
         c = conn.cursor()
 
-        c.execute("SELECT ball_position FROM table ORDER BY id DESC LIMIT 1")
+        c.execute("SELECT * FROM shots ORDER BY rowid DESC LIMIT 1")
         result = c.fetchone()
         
-        POSITION_OF_BALLPOSITIONS_IN_DB = 6
+        if result is None:
+            return []
 
-        print(result[POSITION_OF_BALLPOSITIONS_IN_DB])
-        result_list = result[1:-1].split(' ')
+        POSITION_OF_BALLPOSITIONS_IN_DB = 4
+
+        result_list = result[POSITION_OF_BALLPOSITIONS_IN_DB][1:-2].split('], ')
         to_return = []
         for position in result_list:
-            ball_position = position[1:-1]
+            if position != '[' and len(position) != 0:
+                ball_position = list(map(lambda num: float(num), position[1:].split(', ')))
+                to_return.append(ball_position)
 
         conn.close()
+        return to_return
 
     # In order for the person to be shooting, the ball should be going upwards (-y direction)
     def is_ball_going_up(self, prev_ball_center_pos, ball_center_pos):
@@ -146,6 +171,7 @@ class ShootingCoach:
                 ball_y_center = ((y1 + y2) / 2 / self.height).detach().numpy()
                 self.ball_pos = [ball_x_center[()].item(), ball_y_center[()].item()]
                 ball_width = np.abs((x2 - x1) / self.width)
+                
         # find pose landmarks
         if self.right_handed:
             self.dom_shoulder_pos = [landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value].x, landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value].y]
@@ -208,7 +234,9 @@ class ShootingCoach:
         return elbow_angle
 
     def draw_prev_shot(self, image):
-        image = self.draw_arc(image, None)
+        prev_ball_position = self.get_last_shot_from_db()
+        image = self.draw_arc(image, prev_ball_position)
+        return image
 
     def draw_arc(self, image, shot_ball_positions):
         if shot_ball_positions is None:
@@ -289,7 +317,7 @@ class ShootingCoach:
                     cv2.putText(image, fps, (600, 70), cv2.FONT_HERSHEY_COMPLEX, 1, (100, 255, 0), 1, cv2.LINE_AA)
                     
                     # if the ball is in air, draw arc
-                    self.draw_prev_shot(image)
+                    image = self.draw_prev_shot(image)
 
                     # Show image
                     cv2.imshow('mediapipe', image)
